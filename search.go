@@ -17,8 +17,8 @@ func SearchWithExport(makeService func() *elastic.SearchService, export bool) (*
 	}
 	sortValues := make([]interface{}, 0)
 	var searchResult *elastic.SearchResult
-	for {
-		service := makeService().From(0).Size(searchAfterSize).TrackTotalHits(true)
+	for i := 0; i < maxHit/searchAfterSize; i++ {
+		service := makeService().From(0).Size(searchAfterSize)
 		if len(sortValues) > 0 {
 			service.SearchAfter(sortValues...)
 		}
@@ -34,10 +34,14 @@ func SearchWithExport(makeService func() *elastic.SearchService, export bool) (*
 		} else {
 			searchResult.Hits.Hits = append(searchResult.Hits.Hits, currentResult.Hits.Hits...)
 		}
-		if len(currentResult.Hits.Hits) < searchAfterSize || len(searchResult.Hits.Hits) >= maxHit {
+		if len(currentResult.Hits.Hits) < searchAfterSize {
 			break
 		}
-		sortValues = currentResult.Hits.Hits[searchAfterSize-1].Sort
+		last := currentResult.Hits.Hits[searchAfterSize-1]
+		if len(last.Sort) == 0 {
+			return nil, errors.New("export without sort")
+		}
+		sortValues = last.Sort
 	}
 	return searchResult, nil
 }
