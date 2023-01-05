@@ -39,7 +39,7 @@ func SearchWithExport(makeService func() *elastic.SearchService, export bool) (*
 		}
 		last := currentResult.Hits.Hits[searchAfterSize-1]
 		if len(last.Sort) == 0 {
-			return nil, errors.New("export must not without sort")
+			return nil, errors.New("export without sort")
 		}
 		sortValues = last.Sort
 	}
