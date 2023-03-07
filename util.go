@@ -29,6 +29,7 @@ type BulkOpt struct {
 	Gap            time.Duration // 每批插入的时间间隔 默认 1s
 	Refresh        string        // 是否 refresh 默认 false
 	IgnoreConflict bool          // 是否忽略冲突 默认 false
+	IgnoreDocMiss  bool          // 是否忽略文档不存在 默认 false
 }
 
 type SingleReqMaker func(int) elastic.BulkableRequest
@@ -63,6 +64,7 @@ func MakeRequestWithOpt(es *elastic.Client, bulkSize int, opt BulkOpt,
 	// 保证传入数据的正确性
 	limit := opt.Limit
 	ignoreConflict := opt.IgnoreConflict
+	ignoreDocMiss := opt.IgnoreDocMiss
 	refresh := opt.Refresh
 	reqGap := opt.Gap
 	if es == nil || makeSingleRequest == nil {
@@ -113,7 +115,7 @@ func MakeRequestWithOpt(es *elastic.Client, bulkSize int, opt BulkOpt,
 		if bulkReqErr != nil {
 			return 0, bulkReqErr
 		}
-		roundCount, roundErr := parseBulkResponse(resp, ignoreConflict)
+		roundCount, roundErr := parseBulkResponse(resp, ignoreConflict, ignoreDocMiss)
 		if roundErr != nil {
 			err = multierr.Append(err, roundErr)
 		}
@@ -122,15 +124,20 @@ func MakeRequestWithOpt(es *elastic.Client, bulkSize int, opt BulkOpt,
 	return
 }
 
+func ParseBulkResponseIgnoreDocMiss(resp *elastic.BulkResponse) (int, error) {
+	return parseBulkResponse(resp, false, true)
+}
+
 func ParseBulkResponseIgnoreConflict(resp *elastic.BulkResponse) (int, error) {
-	return parseBulkResponse(resp, true)
+	return parseBulkResponse(resp, true, false)
 }
 
 func ParseBulkResponse(resp *elastic.BulkResponse) (int, error) {
-	return parseBulkResponse(resp, false)
+	return parseBulkResponse(resp, false, false)
 }
 
-func parseBulkResponse(resp *elastic.BulkResponse, ignoreConflict bool) (successCount int, err error) {
+func parseBulkResponse(resp *elastic.BulkResponse,
+	ignoreConflict bool, ignoreDocMissing bool) (successCount int, err error) {
 	if len(resp.Failed()) > 0 {
 		for _, f := range resp.Failed() {
 			if f.Error == nil {
@@ -138,6 +145,10 @@ func parseBulkResponse(resp *elastic.BulkResponse, ignoreConflict bool) (success
 			}
 			if ignoreConflict && f.Error.Type == "version_conflict_engine_exception" {
 				// 不关心重复插入数据的错误
+				continue
+			}
+			if ignoreDocMissing && f.Error.Type == "document_missing_exception" {
+				// 不关心数据不存在的错误
 				continue
 			}
 			err = multierr.Append(err, errors.Errorf("es error: %s [type=%s]", f.Error.Reason, f.Error.Type))
